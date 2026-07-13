@@ -1,7 +1,9 @@
 # Viral Watch 
+##Contributors
 test rules
 testt
 azza
+Marie
 azza
 mansour
 
@@ -27,3 +29,4 @@ Now First We are Creating the file sturacture as follow -
 └── .gitignore
 __init__.py
 Makes the tests directory a Python package (optional but common).
+Lorraine
