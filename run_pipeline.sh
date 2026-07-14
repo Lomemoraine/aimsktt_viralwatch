@@ -1,38 +1,35 @@
+cat << 'EOF' > download_data.sh
 #!/bin/bash
-# ==============================================================================
-# ViralWatch Pipeline - Team Automation Script
-# Runs the environment setup, dependency installation, and pipeline sync.
-# ==============================================================================
-
-# Exit immediately if a command fails
 set -e
 
-echo "🚀 Starting ViralWatch pipeline setup..."
+REPO_URL="https://github.com/INRB-UMIE/BDBV2026-Data.git"
+REPO_DIR="BDBV2026-Data"
 
-# 1. Scaffolding Folders
-echo "📂 Setting up local directories..."
-mkdir -p data/raw data/processed models documentation
+echo "=== 1. Scaffolding Test Directory ==="
+mkdir -p data_test
 
-# 2. Virtual Environment Setup
-if [ ! -d "venv" ]; then
-    echo "📦 Creating virtual environment..."
-    python3 -m venv venv
+echo "=== 2. Cloning/Updating INRB-UMIE Repository ==="
+if [ ! -d "$REPO_DIR" ]; then
+    echo "Cloning the repository..."
+    git clone --depth 1 "$REPO_URL"
 else
-    echo "✔ Virtual environment already exists."
+    echo "Repository already exists. Pulling latest..."
+    git -C "$REPO_DIR" pull
 fi
 
-# 3. Activate and Install Dependencies
-echo "⚡ Activating environment and installing requirements..."
-source venv/bin/activate
-pip install -r requirements.txt
+echo "=== 3. Organizing Ingested Data into data_test/ ==="
+# Copies raw CSV files directly to data_test/
+cp "$REPO_DIR"/data/*.csv data_test/ 2>/dev/null || cp "$REPO_DIR"/*.csv data_test/
 
-# 4. Run Step 1: Data Ingest (need update)
-echo "📥 Syncing remote INRB-UMIE data repository..."
-chmod +x download_data.sh
-./download_data.sh
+echo "=== 4. Fetching WHO Bulletins into data_test/ ==="
+curl -L -s -o data_test/DON602.html "https://www.who.int/emergencies/disease-outbreak-news/item/DON602"
+curl -L -s -o data_test/DON603.html "https://www.who.int/emergencies/disease-outbreak-news/item/DON603"
 
-# 5. Run Step 2: Cleaning & Database Load 
-echo "🧹 Processing and synchronizing databases..."
-python3 daily_pipeline.py
-
-echo "🎉 PIPELINE COMPLETE: Database is successfully loaded and ready!"
+echo "=== 5. Verifying Integrity ==="
+if [ -f "data_test/BDBV2026_Cases_HA.csv" ]; then
+    echo "✔ Ingestion verification successful! All files are in data_test/"
+else
+    echo "❌ INGESTION ERROR: Core files missing from data_test/" >&2
+    exit 1
+fi
+EOF
