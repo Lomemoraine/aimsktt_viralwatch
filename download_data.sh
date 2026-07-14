@@ -1,4 +1,3 @@
-cat << 'EOF' > download_data.sh
 #!/bin/bash
 set -e
 
@@ -32,4 +31,3 @@ else
     echo "❌ INGESTION ERROR: Core files missing from data_test/" >&2
     exit 1
 fi
-EOF
