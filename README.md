@@ -1,216 +1,374 @@
-# aimsktt_viralwatch
-by KB-Fenta and  lorrian
-Here we can work on Linux & Shell for ML Workflows
+# Incremental Data Update Pipeline
 
+## Overview
 
-creat bash 
+ViralWatch implements an **incremental data update pipeline** to continuously integrate new outbreak information from the **INRB-UMIE/BDBV2026-Data repository**.
 
-Step 1 — Create your project repository structure
+Instead of reprocessing the complete outbreak dataset whenever new reports become available, the pipeline identifies only **new or modified records**, applies the existing data-cleaning rules, updates the processed dataset, refreshes the database, and generates new outbreak risk predictions.
 
-From your terminal:
+This design enables ViralWatch to operate as a **near real-time viral haemorrhagic fever early-warning system**.
+
+---
+
+# Data Pipeline Architecture
+
+```text
+INRB-UMIE BDBV2026 Repository
+              |
+              | Automatic update check
+              ↓
+      New Raw Outbreak Data
+              |
+              | Detect new/changed records
+              ↓
+     Incremental Cleaning Pipeline
+              |
+              | Append + Update
+              ↓
+      Processed Clean Dataset
+              |
+              ↓
+        SQLite Database
+              |
+              ↓
+      Machine Learning Models
+              |
+              ↓
+        FastAPI Backend
+              |
+              ↓
+   Cross-Border Risk Dashboard
 ```
-mkdir aimsktt_viralwatch
-cd aimsktt_viralwatch
-```
 
-Create folders:
-```
-mkdir -p data/{raw,processed,external}
-mkdir -p notebooks
-mkdir -p src
-mkdir -p models
-mkdir -p reports
-mkdir -p scripts
-mkdir -p tests
-```
+---
 
-Your structure:
-```
-BDBV2026-Project/
+# Data Organization
+
+ViralWatch maintains a structured data lifecycle with three main data layers:
+
+```text
+data/
 │
-├── data/
-│   ├── raw/
-│   ├── processed/
-│   └── external/
+├── external/
+│   └── BDBV2026-Data/
+│       └── Original INRB-UMIE outbreak dataset
 │
-├── notebooks/
-├── src/
-├── models/
-├── reports/
-├── scripts/
-├── tests/
+├── raw/
+│   └── incoming/
+│       └── Newly downloaded outbreak updates
 │
-├── requirements.txt
-└── .venv/
-```
-Step 2 — Create the Bash setup script
-
-Create:
-```
-nano scripts/setup_project.sh
+└── processed/
+    └── outbreak_clean.csv
+        └── Analysis-ready outbreak dataset
 ```
 
-Save:
+## Data Layer Description
 
-CTRL + O
-ENTER
-CTRL + X
+| Data Layer           | Purpose                                                                                            |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| `data/external/`     | Stores the original outbreak dataset obtained from INRB-UMIE. This source data remains unchanged.  |
+| `data/raw/incoming/` | Temporary storage location for newly collected outbreak updates before processing.                 |
+| `data/processed/`    | Contains cleaned and validated data used by analytics, machine learning models, and the dashboard. |
 
+---
 
+# Incremental Update Workflow
 
-Step 3 — Make the script executable
-```
-chmod +x scripts/setup_project.sh
-```
+## 1. Identify Existing Processed Data
 
+The pipeline first loads the previously processed outbreak dataset:
 
-
-Also check your Python environment on Windows
-
-For your virtual environment, use:
-
-Create:
 ```
-python -m venv .venv
-```
-Activate:
-```
-.\.venv\Scripts\Activate.ps1
-```
-If PowerShell blocks activation, run:
-```
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-```
-Then activate again:
-```
-.\.venv\Scripts\Activate.ps1
+data/processed/outbreak_clean.csv
 ```
 
+Example:
 
-Step 5 — Activate your environment every time
+| Date       | Health Zone | Confirmed Cases | Deaths |
+| ---------- | ----------- | --------------- | ------ |
+| 2026-07-13 | Goma        | 100             | 20     |
+| 2026-07-13 | Beni        | 50              | 10     |
 
-Linux:
-```
-source .venv/bin/activate
-```
-Check:
-```
-python --version
-pip list
-```
-Deactivate:
-```
-deactivate
+The latest processed date is extracted:
+
+```text
+Last processed date:
+2026-07-13
 ```
 
-Step 6 — Create data download script
+This date is used as the reference point for detecting new outbreak information.
 
-Create:
-```
-nano scripts/download_data.sh
-```
+---
 
+# 2. Retrieve Latest Outbreak Data
 
-Make executable:
-```
-chmod +x scripts/download_data.sh
-```
-Run:
-```
-./scripts/download_data.sh
+The pipeline checks the INRB repository for new updates.
+
+```bash
+cd data/external/BDBV2026-Data
+
+git pull
 ```
 
-Step 7 — Verify file integrity script
+Example:
 
-Create:
-```
-nano scripts/verify_files.sh
-```
+Previous dataset:
 
-Run:
 ```
-chmod +x scripts/verify_files.sh
-./scripts/verify_files.sh
+2026-07-13 outbreak report
 ```
 
+New dataset:
 
-Step 8 — Create ML pipeline
-
-Create:
 ```
-nano src/train_model.py
+2026-07-14 outbreak report
 ```
 
+Detected update:
 
+```
+New records available:
+2026-07-14
+```
 
-Step 9 — Run ML training
+---
 
-Activate environment:
+# 3. Detect New or Modified Records
+
+The pipeline compares incoming data with the existing processed dataset.
+
+Example implementation:
+
+```python
+import pandas as pd
+
+existing_data = pd.read_csv(
+    "data/processed/outbreak_clean.csv"
+)
+
+latest_data = pd.read_csv(
+    "data/external/BDBV2026-Data/latest.csv"
+)
+
+last_date = existing_data["date"].max()
+
+new_records = latest_data[
+    latest_data["date"] > last_date
+]
+
+print(new_records)
 ```
-source .venv/bin/activate
-```
-Run:
-```
-python src/train_model.py
-```
+
 Output:
 
-Loading data...
-Training model...
-Accuracy: 0.85
-Model saved
+```text
+New outbreak records:
 
-
-
-
-Step 10 — Create one command pipeline
-
-Create:
-```
-nano scripts/run_pipeline.sh
+2026-07-14 | Goma  | 120 cases
+2026-07-14 | Beni  | 60 cases
 ```
 
+---
 
-Make executable:
+# 4. Apply Data Cleaning Rules
+
+New outbreak records go through the same preprocessing pipeline used during initial dataset preparation.
+
+Cleaning operations include:
+
+* Standardizing health-zone names.
+* Converting date formats.
+* Removing duplicate records.
+* Handling missing values.
+* Correcting inconsistent data formats.
+
+Example:
+
+```python
+new_records["health_zone"] = (
+    new_records["health_zone"]
+    .str.strip()
+    .str.lower()
+)
+
+new_records["date"] = pd.to_datetime(
+    new_records["date"]
+)
 ```
-chmod +x scripts/run_pipeline.sh
+
+---
+
+# 5. Update Processed Dataset
+
+Cleaned records are merged with historical outbreak data.
+
+```python
+updated_dataset = pd.concat(
+    [
+        existing_data,
+        new_records
+    ]
+)
+
+updated_dataset = updated_dataset.drop_duplicates()
 ```
-Run everything:
+
+Updated dataset:
+
+Before:
+
+```text
+2026-07-13 | Goma | 100 cases
 ```
-./scripts/run_pipeline.sh
+
+After:
+
+```text
+2026-07-13 | Goma | 100 cases
+2026-07-14 | Goma | 120 cases
 ```
 
+The final dataset is saved:
 
-
-Final S3 Workflow
-
-Your daily workflow becomes:
+```python
+updated_dataset.to_csv(
+    "data/processed/outbreak_clean.csv",
+    index=False
+)
 ```
-git checkout -b feature/ml-pipeline
 
-source .venv/bin/activate
+---
 
-./scripts/run_pipeline.sh
+# 6. Database Synchronization
 
-git add .
+After processing, the updated dataset refreshes the ViralWatch database.
 
-git commit -m "Add ML pipeline and shell automation"
-
-git push origin feature/ml-pipeline
+```text
+Processed Dataset
+        |
+        ↓
+ SQLite Database
+        |
+        ↓
+ FastAPI Backend
+        |
+        ↓
+ Dashboard
 ```
-Then create a Pull Request.
 
-This covers the S3 requirements:
-✅ Linux filesystem
-✅ Bash scripting
-✅ Pipes/redirection
-✅ curl downloads
-✅ Git repository cloning
-✅ Integrity checking
-✅ Python venv
-✅ pip packages
-✅ ML model training pipeline
-✅ Reproducible workflow
+The database stores:
+
+* Health-zone information.
+* Daily outbreak statistics.
+* Engineered epidemiological features.
+* Model predictions.
+* Risk scores.
+
+---
+
+# 7. Machine Learning Prediction Update
+
+Whenever new outbreak data is available:
+
+1. Feature engineering is executed.
+2. Machine learning models process updated information.
+3. Risk predictions are regenerated.
+4. Dashboard indicators are refreshed.
+
+Example output:
+
+| Health Zone | Risk Level |
+| ----------- | ---------- |
+| Goma        | High       |
+| Rutshuru    | High       |
+| Beni        | Medium     |
+| Bukavu      | Low        |
+
+---
+
+# Automated Daily Update
+
+The update pipeline can run automatically using Linux Cron.
+
+Edit scheduled jobs:
+
+```bash
+crontab -e
+```
+
+Add:
+
+```bash
+0 8 * * * /home/sitanu/viralwatch/scripts/update_pipeline.sh
+```
+
+This executes the update process every day at **08:00 AM**.
+
+Automated workflow:
+
+```text
+1. Pull latest INRB outbreak data
+2. Detect new records
+3. Clean incoming data
+4. Update processed dataset
+5. Synchronize database
+6. Generate risk predictions
+7. Refresh dashboard
+```
+
+---
+
+# Live Demonstration
+
+For the final demonstration, run:
+
+```bash
+./scripts/update_pipeline.sh
+```
+
+Expected output:
+
+```text
+✓ Checking INRB repository updates
+✓ New outbreak records detected
+✓ Data cleaning completed
+✓ Processed dataset updated
+✓ Database synchronized
+✓ Risk predictions generated
+✓ Dashboard refreshed
+```
+
+The dashboard displays updated cross-border outbreak risk information covering:
+
+* North Kivu health zones
+* South Kivu health zones
+* Border regions connected to Rwanda
+
+---
+
+# Benefits of Incremental Updating
+
+The incremental pipeline provides:
+
+✅ Faster data processing compared with full dataset rebuilding
+✅ Continuous outbreak surveillance capability
+✅ Reliable handling of changing epidemiological information
+✅ Updated machine learning predictions
+✅ Near real-time dashboard monitoring
+✅ Scalable architecture for future outbreak sources
+
+---
+
+## Summary
+
+The ViralWatch incremental update pipeline creates a reliable bridge between outbreak data collection, machine learning prediction, and public-health decision support.
+
+By continuously integrating new information while preserving historical records, ViralWatch provides an efficient foundation for early detection and cross-border viral haemorrhagic fever monitoring.
+
+
+
+
+
 
 
 
@@ -277,3 +435,44 @@ Update  requirements.txt and  README.md
 
 
 
+
+
+
+
+
+
+# ViralWatch
+ViralWatch is a five-day capstone project for KTT Fellows designed to create an end-to-end AI early-warning system for the 2026 Bundibugyo virus outbreak in the Democratic Republic of the Congo and Uganda. The system aims to close the critical response gap by detecting outbreak signals weeks earlier than traditional laboratory confirmation.
+
+## Key Project Components:
+Data Pipeline: The team integrates various public datasets—including INRB-UMIE outbreak reports and WHO Disease Outbreak News—to create a reproducible data flow.
+
+
+**Machine Learning & NLP**: The system employs supervised classifiers to predict case onset, a One-Class SVM to detect anomalous pre-outbreak reporting patterns, and NLP pipelines (using Hugging Face) to extract health alerts from official WHO bulletins.
+
+**Infrastructure**: The project serves data via a FastAPI backend and displays it on a cross-border watchlist dashboard, focusing specifically on North Kivu and South Kivu zones bordering Rwanda.
+
+
+## Evaluation Criteria:
+
+The project is assessed based on engineering quality, data and machine learning rigor, the anomaly detection proof point (specifically catching signals before the May 15 confirmation), and the successful execution of a live demo.
+
+# Project structure:
+```
+BDBV2026-Project/
+│
+├── data/
+│   ├── raw/
+│   ├── processed/
+│   └── external/
+│
+├── notebooks/
+├── src/
+├── models/
+├── reports/
+├── scripts/
+├── tests/
+│
+├── requirements.txt
+└── .venv/
+```
