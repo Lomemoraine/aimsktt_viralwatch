@@ -56,9 +56,8 @@ def clean_and_sync():
     all_files = glob.glob(os.path.join("data_test", "*"))
     processed_count = 0
     
-    # Structures to hold files for merging
+    # Structure to hold WorldPop files for merging
     worldpop_dfs = {"count": None, "density": None}
-    crossborder_dfs = {}  # Dictionary mapping suffix -> DataFrame
     
     for file_path in all_files:
         filename = os.path.basename(file_path)
@@ -95,7 +94,7 @@ def clean_and_sync():
         if any(name_lower.endswith(ext) for ext in [".shx", ".dbf", ".prj", ".cpg"]):
             continue
 
-        # Dynamic Route 1: Group WorldPop Components
+        # Dynamic Route: Group WorldPop Components
         if name_lower.startswith("worldpop_"):
             try:
                 print(f"🌍 Reading WorldPop Component: '{filename}'")
@@ -111,27 +110,6 @@ def clean_and_sync():
                 print(f"❌ Failed to extract WorldPop segment '{filename}': {e}")
                 continue
 
-        # Dynamic Route 2: Group Crossborder Components
-        if name_lower.startswith("cross_border"):
-            try:
-                print(f"🛂 Reading Cross-border Component: '{filename}'")
-                raw_df = pd.read_csv(file_path)
-                processed_df = clean_dataframe(raw_df)
-                
-                # Determine suffix based on name identifiers
-                if "density" in name_lower:
-                    suffix = "density"
-                elif "count" in name_lower or "pop" in name_lower:
-                    suffix = "count"
-                else:
-                    suffix = name_lower.replace("cross_border_", "").replace(".csv", "")[:15]
-                
-                crossborder_dfs[suffix] = processed_df
-                continue
-            except Exception as e:
-                print(f"❌ Failed to extract Cross-border segment '{filename}': {e}")
-                continue
-
         print(f"📦 Re-building Table: '{clean_name}' from raw file...")
         
         try:
@@ -141,7 +119,7 @@ def clean_and_sync():
                 raw_df = pd.read_csv(file_path)
                 processed_df = clean_dataframe(raw_df)
             
-            # Save normal table to database
+            # Save normal table (including individual cross_border files) to database
             processed_df.to_sql(clean_name, engine, if_exists='replace', index=False)
             print(f"✔ Table '{clean_name}' completely replaced.")
             processed_count += 1
@@ -180,50 +158,8 @@ def clean_and_sync():
             processed_count += 1
         except Exception as e:
             print(f"❌ Failed to join combined WorldPop table: {e}")
-
-    # ==========================================
-    # Dynamic Join: Merge & Order Crossborder
-    # ==========================================
-    if crossborder_dfs:
-        try:
-            print("🔗 Merging and formatting Cross-border dataframes...")
-            suffixes = list(crossborder_dfs.keys())
             
-            merged_cb = crossborder_dfs[suffixes[0]]
-            keys_cb = [col for col in merged_cb.columns if col in ['health_zone', 'province']]
-            if not keys_cb:
-                keys_cb = [merged_cb.columns[0]]
-                
-            merged_cb = merged_cb.rename(
-                columns={c: f"{c}_{suffixes[0]}" for c in merged_cb.columns if c not in keys_cb}
-            )
-            
-            for _suff in suffixes[1:]:
-                next_df = crossborder_dfs[_suff]
-                next_keys = [col for col in next_df.columns if col in ['health_zone', 'province']]
-                if not next_keys:
-                    next_keys = [next_df.columns[0]]
-                
-                join_on = list(set(keys_cb).intersection(next_keys))
-                if not join_on:
-                    join_on = [keys_cb[0]]
-                
-                next_df_renamed = next_df.rename(
-                    columns={c: f"{c}_{_suff}" for c in next_df.columns if c not in join_on}
-                )
-                
-                merged_cb = pd.merge(merged_cb, next_df_renamed, on=join_on, how="outer")
-            
-            # Reorder columns: [Names] -> [Count] -> [Density]
-            merged_cb = reorder_columns(merged_cb)
-            
-            merged_cb.to_sql("crossborder_nom_count_density", engine, if_exists='replace', index=False)
-            print("✔ Table 'crossborder_nom_count_density' successfully built (correct columns ordered!).")
-            processed_count += 1
-        except Exception as e:
-            print(f"❌ Failed to join combined Cross-border table: {e}")
-            
-    print(f"🎉 Complete! All previous tables cleared; {processed_count} unified tables deployed successfully.")
+    print(f"🎉 Complete! All previous tables cleared; {processed_count} tables deployed successfully.")
 
 if __name__ == "__main__":
     clean_and_sync()
