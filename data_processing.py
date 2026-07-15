@@ -2,7 +2,6 @@ import os
 import pandas as pd
 import numpy as np
 
-# Try to import geopandas for spatial shapefile processing; fallback gracefully if not installed
 try:
     import geopandas as gpd
     GEOPANDAS_AVAILABLE = True
@@ -37,17 +36,68 @@ def remove_accents(series):
             .str.strip()
             .str.title())
 
+# Global lookups for entity standardization
+ZONE_ALIASES = {}
+PROVINCE_ALIASES = {}
+
+def load_aliases():
+    """Builds lookup dictionaries mapping observed spellings to canonical names."""
+    global ZONE_ALIASES, PROVINCE_ALIASES
+    
+    # Load Health Zone Aliases
+    zone_path = os.path.join("data_test", "aliases.csv")
+    if os.path.exists(zone_path):
+        try:
+            df_zones = pd.read_csv(zone_path)
+            # Typically 'observed_name' -> 'canonical_nom'
+            if 'observed_name' in df_zones.columns and 'canonical_nom' in df_zones.columns:
+                ZONE_ALIASES = dict(zip(
+                    df_zones['observed_name'].astype(str).str.lower().str.strip(),
+                    df_zones['canonical_nom'].astype(str).str.strip()
+                ))
+        except Exception as e:
+            print(f"⚠️ Error building zone aliases dictionary: {e}")
+
+    # Load Province Aliases
+    prov_path = os.path.join("data_test", "province_aliases.csv")
+    if os.path.exists(prov_path):
+        try:
+            df_provs = pd.read_csv(prov_path)
+            if 'observed_name' in df_provs.columns and 'canonical_nom' in df_provs.columns:
+                PROVINCE_ALIASES = dict(zip(
+                    df_provs['observed_name'].astype(str).str.lower().str.strip(),
+                    df_provs['canonical_nom'].astype(str).str.strip()
+                ))
+        except Exception as e:
+            print(f"⚠️ Error building province aliases dictionary: {e}")
+
 def clean_dataframe(df):
-    """Applies rigorous data cleaning and normalization to standard DataFrames."""
+    """Applies clean-up logic, replacing health zone/province values with canonical_nom equivalents."""
+    # Ensure our lookup maps are initialized
+    if not ZONE_ALIASES and not PROVINCE_ALIASES:
+        load_aliases()
+
     # 1. Clean and Map Column Headers
     df.columns = df.columns.str.lower().str.strip()
     df = df.rename(columns=COLUMN_TRANSLATIONS)
     
-    # 2. Normalize Geographic Names
+    # 2. Process & Map Geographic Names to Canonical Nom
     zone_cols = [c for c in df.columns if 'zone' in c or 'health_zone' in c]
     if zone_cols:
-        df[zone_cols[0]] = df[zone_cols[0]].astype(str).str.replace(r"(?i)zone de sant(e|é)\s*", "", regex=True)
-        df[zone_cols[0]] = remove_accents(df[zone_cols[0]])
+        col = zone_cols[0]
+        # Drop prefixes
+        df[col] = df[col].astype(str).str.replace(r"(?i)zone de sant(e|é)\s*", "", regex=True)
+        # Normalize spelling
+        df[col] = remove_accents(df[col])
+        # Map using aliases registry fallback to normalized name
+        df[col] = df[col].apply(lambda val: ZONE_ALIASES.get(val.lower().strip(), val))
+    
+    # Process Province columns to Canonical Nom
+    prov_cols = [c for c in df.columns if 'province' in c]
+    if prov_cols:
+        col = prov_cols[0]
+        df[col] = remove_accents(df[col])
+        df[col] = df[col].apply(lambda val: PROVINCE_ALIASES.get(val.lower().strip(), val))
     
     # 3. Clean dates
     if 'date' in df.columns:
@@ -58,7 +108,7 @@ def clean_dataframe(df):
             
     # 4. Standardize Categorical Column values
     for col in df.columns:
-        if df[col].dtype == 'object' and (not zone_cols or col != zone_cols[0]):
+        if df[col].dtype == 'object' and col not in zone_cols and col not in prov_cols:
             cleaned_series = df[col].astype(str).str.lower().str.strip()
             cleaned_series = (cleaned_series.str.normalize('NFKD')
                               .str.encode('ascii', errors='ignore')
@@ -78,18 +128,15 @@ def clean_dataframe(df):
 def process_shapefile(file_path):
     """Loads a shapefile using Geopandas and simplifies coordinates for standard database storage."""
     if not GEOPANDAS_AVAILABLE:
-        print("⚠️ Warning: geopandas or pyproj is not installed. Shapefile will be loaded as basic pandas.")
-        df = pd.read_csv(file_path.replace(".shp", ".dbf"), errors="ignore") # fallback to read attribute table
+        print("⚠️ Warning: geopandas is not installed. Shapefile fallback to pandas DBF parse.")
+        df = pd.read_csv(file_path.replace(".shp", ".dbf"), errors="ignore")
         return clean_dataframe(df)
         
-    print(f"🗺️ Spatial conversion: Reading shapefile geometry from {os.path.basename(file_path)}")
+    print(f"🗺️ Spatial conversion: Reading {os.path.basename(file_path)}")
     gdf = gpd.read_file(file_path)
     
-    # Convert active Geometry column to simple Well-Known Text representation (WKT) 
-    # This allows standard SQL tables to hold spatial attributes safely
     if 'geometry' in gdf.columns:
         gdf['wkt_geometry'] = gdf['geometry'].apply(lambda geom: geom.wkt if geom else None)
-        # Drop raw spatial geometry object so pandas can write to SQL without serialization errors
         gdf = gdf.drop(columns=['geometry'])
         
     return clean_dataframe(pd.DataFrame(gdf))
