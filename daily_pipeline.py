@@ -1,6 +1,7 @@
 import os
 import glob
 import hashlib
+import re
 import pandas as pd
 from sqlalchemy import create_engine, text
 from data_processing import clean_dataframe, process_shapefile
@@ -17,16 +18,43 @@ else:
     engine = create_engine("sqlite:///data_test/viralwatch.db")
     print("📁 DATABASE_URL not found. Saving locally to data_test/viralwatch.db.")
 
-ddef reorder_columns(df):
+def clean_column_name(col):
+    """
+    Standardizes cross-border column headers to match exact patterns:
+    nom, poesmean, daily_passengersmean, weekly_passengerspoe_names
+    separating components strictly with a single underscore.
+    """
+    c = col.lower().strip()
+    
+    if 'zone' in c or 'nom' in c or 'health_zone' in c:
+        return 'nom'
+    if 'weekly' in c or 'week' in c:
+        return 'weekly_passengerspoe_names'
+    if 'daily' in c or 'day' in c:
+        return 'daily_passengersmean'
+    if 'poes' in c or 'poe' in c:
+        return 'poesmean'
+        
+    # Standard cleanup fallback
+    c = re.sub(r'[^a-z0-9_]', '_', c)
+    c = re.sub(r'_+', '_', c)
+    return c.strip('_')
+
+def reorder_columns(df, is_crossborder=False):
     """
     Reorders a DataFrame to guarantee:
-    1st: Nom/Geographic Keys (health_zone, province, nom, zone, etc.)
-    2nd: Count data (columns containing 'count')
-    3rd: Density data (columns containing 'density')
+    If crossborder: nom -> poesmean -> daily_passengersmean -> weekly_passengerspoe_names
+    Else: Nom/Geographic Keys -> Count columns -> Density columns
     """
     cols = list(df.columns)
     
-    # Identify geographic keys dynamically (including variations of 'nom' and 'zone')
+    if is_crossborder:
+        target_order = ['nom', 'poesmean', 'daily_passengersmean', 'weekly_passengerspoe_names']
+        ordered_cols = [c for c in target_order if c in cols]
+        other_cols = [c for c in cols if c not in ordered_cols]
+        return df[ordered_cols + other_cols]
+    
+    # Standard ordering for WorldPop and normal tables
     key_cols = [
         c for c in cols 
         if c in ['health_zone', 'province', 'nom', 'zone', 'nom_zone'] 
@@ -34,14 +62,10 @@ ddef reorder_columns(df):
         or 'province' in c
     ]
     
-    # Categorize count and density columns (excluding keys)
     count_cols = [c for c in cols if 'count' in c and c not in key_cols]
-    density_cols = [c for c in cols if 'density' in c and c not in key_cols]
-    
-    # Any other remaining columns
+    density_cols = [c for c in cols if 'density' in c and c not in key_cols and c not in count_cols]
     other_cols = [c for c in cols if c not in key_cols and c not in count_cols and c not in density_cols]
     
-    # Re-assemble strictly: [Keys/Names] -> [Counts] -> [Densities] -> [Others]
     ordered_cols = key_cols + count_cols + density_cols + other_cols
     return df[ordered_cols]
 
@@ -126,7 +150,13 @@ def clean_and_sync():
                 raw_df = pd.read_csv(file_path)
                 processed_df = clean_dataframe(raw_df)
             
-            # Save normal table (including individual cross_border files) to database
+            # Special processing for individual crossborder files
+            if name_lower.startswith("cross_border"):
+                # Clean headers to requested patterns
+                processed_df.columns = [clean_column_name(col) for col in processed_df.columns]
+                processed_df = reorder_columns(processed_df, is_crossborder=True)
+            
+            # Save normal table to database
             processed_df.to_sql(clean_name, engine, if_exists='replace', index=False)
             print(f"✔ Table '{clean_name}' completely replaced.")
             processed_count += 1
@@ -159,6 +189,9 @@ def clean_and_sync():
             
             # Reorder columns: [Names] -> [Count] -> [Density]
             merged_worldpop = reorder_columns(merged_worldpop)
+            
+            # Ensure the headers are clean lowercase separated by single underscores
+            merged_worldpop.columns = [clean_column_name(col) for col in merged_worldpop.columns]
             
             merged_worldpop.to_sql("worldpop_nom_count_density", engine, if_exists='replace', index=False)
             print("✔ Table 'worldpop_nom_count_density' successfully built (correct columns ordered!).")
