@@ -7,7 +7,7 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from data_processing import clean_dataframe, process_shapefile, join_insp_sitrep_csvs
 
-# 1. Fetch Connection String
+# 1. Fetch Connection String from Environment
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 if DATABASE_URL:
@@ -20,6 +20,9 @@ else:
     print("📁 DATABASE_URL not found. Saving locally to data_test/viralwatch.db.")
 
 def clean_column_name(col):
+    """
+    Standardizes column headers globally to lowercase separated by single underscores.
+    """
     c = col.lower().strip()
     c = re.sub(r'[^a-z0-9_]', '_', c)
     c = re.sub(r'_+', '_', c)
@@ -39,19 +42,18 @@ def clean_and_sync():
         except Exception as e:
             print(f"⚠️ Warning: Schema reset failed: {e}. Moving to standard table replacements.")
 
-    # --- NEW: Join all raw sitrep files into one merged CSV first ---
+    # --- 2. Zero-Loss Merge of individual INSP sitreps into a single wide CSV ---
     data_test_dir = Path("data_test")
     merged_output_path = data_test_dir / "insp_sitrep_merged.csv"
     
     try:
         print("🔗 Merging all individual INSP sitrep CSVs into a single wide table...")
-        # We point it directly to data_test where GitHub downloaded your files
         join_insp_sitrep_csvs(input_dir=data_test_dir, output_path=merged_output_path)
         print(f"✔ Wide table successfully compiled at {merged_output_path}")
     except Exception as e:
         print(f"⚠️ Merge failed: {e}. Individual sitreps will be processed raw instead.")
 
-    # Gather files inside data_test for DB sync
+    # 3. Gather files inside data_test for DB sync
     all_files = glob.glob(os.path.join("data_test", "*"))
     processed_count = 0
     
@@ -59,27 +61,26 @@ def clean_and_sync():
         filename = os.path.basename(file_path)
         name_lower = filename.lower()
         
-        # Skip the individual raw sitrep files since we successfully merged them!
+        # Skip raw individual sitreps (we already merged them into 'insp_sitrep_merged.csv'!)
         if name_lower.startswith("insp_sitrep__") and name_lower != "insp_sitrep_merged.csv":
             continue
             
-        normalized_name = name_lower.replace("__", "_")
-        
-        # Determine if file is targeted
+        # Flexible substring matching to ensure no file is skipped due to underscores or capitalization
         is_matched = (
-            normalized_name.startswith("insp") or
-            normalized_name.startswith("epi_cases") or
-            normalized_name.startswith("worldpop") or
-            normalized_name.startswith("osrm") or
-            normalized_name.startswith("cross_border") or
-            normalized_name.startswith("flowminder_short") or
-            normalized_name.startswith("grid3_healthsites") or
+            "insp" in name_lower or
+            "epi_cases" in name_lower or
+            "worldpop" in name_lower or
+            "osrm" in name_lower or
+            "cross_border" in name_lower or
+            "flowminder" in name_lower or
+            "grid3" in name_lower or
             name_lower.endswith(".shp")
         )
         
         if not is_matched:
             continue
             
+        # Format clean, SQL-friendly table names
         clean_name = (filename.lower()
                       .replace(".matrix.csv", "_matrix")
                       .replace(".csv", "")
@@ -90,11 +91,12 @@ def clean_and_sync():
         
         clean_name = re.sub(r'_+', '_', clean_name).strip('_')
         
-        # PostgreSQL limit safety
+        # PostgreSQL safety: Truncate table names if they exceed 60 characters
         if len(clean_name) > 60:
             name_hash = hashlib.md5(clean_name.encode('utf-8')).hexdigest()[:6]
             clean_name = f"{clean_name[:50]}_{name_hash}"
         
+        # Skip helper shapefile extensions
         if any(name_lower.endswith(ext) for ext in [".shx", ".dbf", ".prj", ".cpg"]):
             continue
 
@@ -107,11 +109,19 @@ def clean_and_sync():
                 raw_df = pd.read_csv(file_path)
                 processed_df = clean_dataframe(raw_df)
             
-            # Standardize headers
+            # Standardize headers to lower_snake_case
             processed_df.columns = [clean_column_name(col) for col in processed_df.columns]
             
-            # Save normal table to database
-            processed_df.to_sql(clean_name, engine, if_exists='replace', index=False)
+            # Save normal table to database using optimized batched inserting (Fast Upload)
+            print(f"🚀 Uploading {len(processed_df)} rows to '{clean_name}'...")
+            processed_df.to_sql(
+                clean_name, 
+                engine, 
+                if_exists='replace', 
+                index=False,
+                method='multi',
+                chunksize=5000
+            )
             print(f"✔ Table '{clean_name}' completely replaced.")
             processed_count += 1
             
