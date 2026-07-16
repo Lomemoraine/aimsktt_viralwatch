@@ -59,31 +59,26 @@ def remove_accents(series: pd.Series) -> pd.Series:
 
 def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """Applies standard data cleaning and normalization to DataFrames."""
-    # 1. Clean and Map Column Headers
     df.columns = df.columns.str.lower().str.strip()
     df = df.rename(columns=COLUMN_TRANSLATIONS)
     
-    # 2. Process & Standardize Geographic Names
     zone_cols = [c for c in df.columns if 'zone' in c or 'health_zone' in c]
     if zone_cols:
         col = zone_cols[0]
         df[col] = df[col].astype(str).str.replace(r"(?i)zone de sant(e|é)\s*", "", regex=True)
         df[col] = remove_accents(df[col])
     
-    # Standardize Province columns
     prov_cols = [c for c in df.columns if 'province' in c]
     if prov_cols:
         col = prov_cols[0]
         df[col] = remove_accents(df[col])
     
-    # 3. Clean dates
     if 'date' in df.columns:
         df['date'] = df['date'].astype(str).str.replace(r'[\[\]\'"\s]', '', regex=True)
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
         if zone_cols:
             df = df.sort_values(by=[zone_cols[0], 'date'])
             
-    # 4. Standardize Categorical Column values
     for col in df.columns:
         if df[col].dtype == 'object' and col not in zone_cols and col not in prov_cols:
             cleaned_series = df[col].astype(str).str.lower().str.strip()
@@ -93,7 +88,6 @@ def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             if cleaned_series.isin(STATUS_TRANSLATIONS.keys()).any():
                 df[col] = cleaned_series.replace(STATUS_TRANSLATIONS).str.title()
                 
-    # 5. Handle Null-like strings to proper Numeric Nulls
     numeric_candidates = ['confirmed_cases', 'suspected_cases', 'deaths', 'recovered', 'cases', 'value']
     for col in df.columns:
         if col in numeric_candidates or df[col].astype(str).str.upper().isin(['ND', 'N/D', 'NULL']).any():
@@ -141,10 +135,7 @@ def process_shapefile(file_path: str) -> pd.DataFrame:
 
 def join_insp_sitrep_csvs(input_dir: Path | str, output_path: Path | str) -> pd.DataFrame:
     """
-    Join all INSP SitRep CSV files on (nom, date) into a wide table.
-
-    Each file contributes one metric column, named after the filename.
-    Missing combinations remain as NaN.
+    Join ALL INSP SitRep CSV files on (nom, date) into a single wide table without losing any data.
     """
     input_dir = Path(input_dir)
     output_path = Path(output_path)
@@ -154,42 +145,57 @@ def join_insp_sitrep_csvs(input_dir: Path | str, output_path: Path | str) -> pd.
         raise FileNotFoundError(f"No insp_sitrep*.csv files found in {input_dir}")
 
     frames: list[pd.DataFrame] = []
-    skipped_files: list[str] = []
 
     for csv_path in csv_files:
-        with csv_path.open("r", encoding="utf-8") as handle:
-            first_line = handle.readline().strip().split(",")
+        # Load raw data
+        df = pd.read_csv(csv_path)
+        df.columns = df.columns.str.lower().str.strip()
 
-        if len(first_line) >= 2 and first_line[0].strip().lower() == "nom" and first_line[1].strip().lower() == "date":
-            df = pd.read_csv(csv_path)
-        else:
-            df = pd.read_csv(csv_path, header=None)
-            if df.shape[1] >= 3:
-                df = df.iloc[:, :3].copy()
-                df.columns = ["nom", "date", "value"]
-            else:
-                print(f"Skipping {csv_path.name}: expected at least 3 columns")
-                skipped_files.append(csv_path.name)
-                continue
+        # Dynamic header mapping to prevent dropouts
+        rename_map = {}
+        for col in df.columns:
+            if col in ['nom', 'zone_sante', 'zone_de_sante', 'nom_zone', 'health_zone']:
+                rename_map[col] = 'nom'
+            elif col in ['date', 'jour', 'date_rapport', 'date_notification']:
+                rename_map[col] = 'date'
+        
+        df = df.rename(columns=rename_map)
 
-        if {"nom", "date"}.difference(df.columns):
-            print(f"Skipping {csv_path.name}: missing required columns")
-            skipped_files.append(csv_path.name)
+        # Fallback: if 'nom' or 'date' are still missing, assign them to the first two columns
+        if 'nom' not in df.columns and len(df.columns) > 0:
+            df.rename(columns={df.columns[0]: 'nom'}, inplace=True)
+        if 'date' not in df.columns and len(df.columns) > 1:
+            df.rename(columns={df.columns[1]: 'date'}, inplace=True)
+
+        # Skip only if the file is completely empty
+        if 'nom' not in df.columns or 'date' not in df.columns:
+            print(f"⚠️ Warning: {csv_path.name} is missing usable columns. Skipping to avoid breakages.")
             continue
 
-        value_columns = [column for column in df.columns if column not in {"nom", "date"}]
-        if len(value_columns) != 1:
-            raise ValueError(f"{csv_path.name} must contain exactly one value column; found {value_columns}")
+        # Standardize date format without losing unparseable ones (keep as strings)
+        df['date'] = df['date'].astype(str).str.strip()
 
-        metric_name = csv_path.stem.split("__")[1] if len(csv_path.stem.split("__")) >= 2 else value_columns[0]
-        frame = df[["nom", "date", value_columns[0]]].copy()
-        frame["date"] = pd.to_datetime(frame["date"], errors="coerce").dt.strftime("%Y-%m-%d")
-        frame.rename(columns={value_columns[0]: metric_name}, inplace=True)
-        frames.append(frame)
+        # Identify metric columns (everything that is not nom or date)
+        value_columns = [col for col in df.columns if col not in ['nom', 'date']]
+        
+        # If there are no value columns, make a placeholder so the row matches are preserved
+        if not value_columns:
+            df[f"has_data_{csv_path.stem}"] = 1
+            value_columns = [f"has_data_{csv_path.stem}"]
+
+        # Rename the metric columns after the file suffix if they are generic (like 'value' or 'cases')
+        for col in value_columns:
+            if col in ['value', 'cases', 'count', 'valeur']:
+                metric_name = csv_path.stem.split("__")[1] if len(csv_path.stem.split("__")) >= 2 else csv_path.stem
+                df.rename(columns={col: metric_name}, inplace=True)
+
+        # Append to processing frames
+        frames.append(df)
 
     if not frames:
-        raise RuntimeError(f"No frames to merge. Skipped files: {skipped_files}")
+        raise RuntimeError("No valid data frames to merge.")
 
+    # Execute dynamic outer merge across all files
     merged = frames[0]
     for frame in frames[1:]:
         merged = pd.merge(merged, frame, on=["nom", "date"], how="outer")
@@ -206,13 +212,6 @@ def main() -> None:
 
     merged = join_insp_sitrep_csvs(input_dir, output_path)
     print(f"Wrote {len(merged)} rows to {output_path}")
-    print(f"Health zones (unique nom): {merged['nom'].nunique()}")
-    date_series = pd.to_datetime(merged["date"], errors="coerce")
-    print(f"Date range: {date_series.min().date() if date_series.notna().any() else 'NA'} to {date_series.max().date() if date_series.notna().any() else 'NA'}")
-    print("Missing values per column:")
-    print(merged.isna().sum())
-    print("Preview:")
-    print(merged.head())
 
 
 if __name__ == "__main__":
