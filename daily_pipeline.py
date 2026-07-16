@@ -124,7 +124,7 @@ def clean_and_sync():
             
             print(f"📋 'osrm_nearest_active_feature' columns right before SQL: {list(osrm_df.columns)}")
             
-            # --- 💡 PRINT OUTPUT HEAD ---
+            # --- PRINT OUTPUT HEAD ---
             print("\n📊 PREVIEW OF COMPUTED OSRM FEATURES:")
             print(osrm_df.head(10).to_string(index=False))
             print("=====================================\n")
@@ -175,15 +175,15 @@ def clean_and_sync():
             
             print(f"📋 'worldpop_merged' columns right before SQL: {list(wp_df.columns)}")
             
-            # --- 💡 PRINT OUTPUT HEAD ---
+            # --- PRINT OUTPUT HEAD ---
             print("\n📊 PREVIEW OF MERGED WORLDPOP:")
             print(wp_df.head(10).to_string(index=False))
             print("=====================================\n")
 
             wp_df.to_sql("worldpop_merged", engine, if_exists='replace', index=False)
-            print("❌ WorldPop upload failed: {e}")
-    except Exception as e:
-        print(f"❌ WorldPop upload failed: {e}")
+            print("✔ WorldPop data successfully written to database!")
+    except Exception as err:
+        print(f"❌ WorldPop upload failed: {err}")
 
     print("🎉 Sync completed successfully!")
 
