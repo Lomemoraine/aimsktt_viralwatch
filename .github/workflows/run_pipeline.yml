@@ -10,9 +10,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout Main Repository
+        uses: actions/checkout@v4
+
+      - name: Checkout Remote Data Repository (No LFS)
         uses: actions/checkout@v4
         with:
+          repository: 'INRB-UMIE/BDBV2026-Data'
+          path: 'BDBV2026-Data'
           lfs: false
         env:
           GIT_LFS_SKIP_SMUDGE: 1
