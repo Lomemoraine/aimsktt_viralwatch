@@ -62,6 +62,11 @@ def clean_and_sync():
             merged_df = clean_dataframe(merged_df)
             merged_df.columns = [clean_column_name(col) for col in merged_df.columns]
             
+            # Ensure 'nom' is the first column in the DB output
+            if 'nom' in merged_df.columns:
+                cols = ['nom'] + [col for col in merged_df.columns if col != 'nom']
+                merged_df = merged_df[cols]
+            
             merged_df.to_sql(
                 "insp_sitrep_merged", 
                 engine, 
@@ -88,6 +93,11 @@ def clean_and_sync():
             flow_df = clean_dataframe(flow_df)
             flow_df.columns = [clean_column_name(col) for col in flow_df.columns]
             
+            # Ensure 'nom' is the first column in the DB output
+            if 'nom' in flow_df.columns:
+                cols = ['nom'] + [col for col in flow_df.columns if col != 'nom']
+                flow_df = flow_df[cols]
+            
             flow_df.to_sql(
                 "flowminder_merged", 
                 engine, 
@@ -113,6 +123,11 @@ def clean_and_sync():
             print("🚀 Uploading 'worldpop_merged' directly to DB...")
             wp_df = clean_dataframe(wp_df)
             wp_df.columns = [clean_column_name(col) for col in wp_df.columns]
+            
+            # Ensure 'nom' is the first column in the DB output
+            if 'nom' in wp_df.columns:
+                cols = ['nom'] + [col for col in wp_df.columns if col != 'nom']
+                wp_df = wp_df[cols]
             
             wp_df.to_sql(
                 "worldpop_merged", 
@@ -169,6 +184,11 @@ def clean_and_sync():
             raw_df = pd.read_csv(file_path)
             processed_df = clean_dataframe(raw_df)
             processed_df.columns = [clean_column_name(col) for col in processed_df.columns]
+            
+            # Ensure 'nom' is the first column if it exists in standard tables too
+            if 'nom' in processed_df.columns:
+                cols = ['nom'] + [col for col in processed_df.columns if col != 'nom']
+                processed_df = processed_df[cols]
             
             processed_df.to_sql(
                 clean_name, 
