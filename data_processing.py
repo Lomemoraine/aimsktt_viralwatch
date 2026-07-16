@@ -6,7 +6,10 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import create_engine, text
 
-# 1. Fetch Connection String from Environment
+# 1. Import your custom cleaning and merging tools from data_processing.py
+from data_processing import clean_dataframe, join_insp_sitrep_csvs
+
+# 2. Fetch Connection String from Environment
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 if DATABASE_URL:
@@ -41,13 +44,13 @@ def clean_and_sync():
         except Exception as e:
             print(f"⚠️ Warning: Schema reset failed: {e}. Moving to standard table replacements.")
 
-    # --- 2. Determine raw data location dynamically ---
+    # --- 3. Determine raw data location dynamically ---
     data_dir = Path("data_test")
     if not data_dir.exists() or not any(data_dir.iterdir()):
         print("⚠️ 'data_test' directory not found or empty. Falling back to root workspace directory.")
         data_dir = Path(".")
 
-    # --- 3. Zero-Loss Merge of individual INSP sitreps directly into PostgreSQL ---
+    # --- 4. Zero-Loss Merge of individual INSP sitreps directly into PostgreSQL ---
     merged_output_path = data_dir / "insp_sitrep_merged.csv"
     
     try:
@@ -79,7 +82,7 @@ def clean_and_sync():
     except Exception as e:
         print(f"❌ Critical Merge / Upload failed: {e}")
 
-    # 4. Gather files for standard DB sync (Skipping GRID3 and Cross Border)
+    # 5. Gather files for standard DB sync (Skipping GRID3 and Cross Border)
     all_files = glob.glob(os.path.join(str(data_dir), "*"))
     processed_count = 0
     
