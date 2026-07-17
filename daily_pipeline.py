@@ -38,8 +38,8 @@ DATA_REPO_DIR = Path("BDBV2026-Data")
 BUILD_DIR = DATA_REPO_DIR / "build"
 BUILD_LONG_DIR = DATA_REPO_DIR / "build" / "long"
 
-# Source configurations - Swapped to the static matrix file in the build/ folder
-OSRM_PATH = BUILD_DIR / "osrm__travel_time__static.matrix.csv"
+# Source configurations - Updated with the specific "matrix" subdirectory
+OSRM_PATH = BUILD_DIR / "matrix" / "osrm__travel_time__static.matrix.csv"
 ALIASES_PATH = DATA_REPO_DIR / "data" / "aliases.csv"
 WP_COUNT_PATH = BUILD_LONG_DIR / "worldpop__pop_count.csv"
 WP_DENSITY_PATH = BUILD_LONG_DIR / "worldpop__pop_density.csv"
@@ -260,7 +260,7 @@ def run_pipeline():
         # Dynamic inputs pointing to generated pipeline CSV pathways
         raw_sitrep_filepath = output_dir / "insp_sitrep_training_window.csv"
         pop_filepath = BUILD_LONG_DIR / "worldpop__pop_density.csv"
-        matrix_filepath = OSRM_PATH  # Pointing to the newly configured static matrix file path
+        matrix_filepath = OSRM_PATH  # Pointing directly to build/matrix/...
         
         # A. Execute Processing Flow
         print("   -> Calculating days since initial case benchmark...")
@@ -278,8 +278,6 @@ def run_pipeline():
         df_target_features = create_target_variable(df_master)
 
         # --- DYNAMIC DROP: Clean and robust removal of raw numeric and date headers ---
-        # Instead of arbitrary slicing, we dynamically filter column names.
-        # We reject columns that are pure integers or are date-formatted strings (like '2026-05-14').
         date_pattern = re.compile(r'^\d{4}-\d{2}-\d{2}$')
         cols_to_keep = []
         for col in df_target_features.columns:
