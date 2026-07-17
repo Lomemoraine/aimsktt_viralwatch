@@ -16,6 +16,7 @@ from data_processing import (
     handle_missingness
 )
 
+# --- Database Engine Setup ---
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if DATABASE_URL:
     if DATABASE_URL.startswith("postgres://"):
@@ -38,6 +39,7 @@ WP_DENSITY_PATH = BUILD_LONG_DIR / "worldpop__pop_density.csv"
 
 
 def clean_column_name(col):
+    """Sanitizes columns to safe, standardized database snake_case."""
     c = col.lower().strip()
     c = re.sub(r'[^a-z0-9_]', '_', c)
     c = re.sub(r'_+', '_', c)
@@ -100,7 +102,7 @@ def run_pipeline():
     except Exception as e:
         print(f"❌ WorldPop merging failed: {e}")
 
-    # --- 5. Generate and Clean ML-Ready Training Table ---
+    # --- 5. Generate and Clean ML-Ready Training Tables ---
     print("\n⏳ Building training datasets...")
     try:
         sit_p = output_dir / "insp_sitrep_training_window.csv"
@@ -108,38 +110,65 @@ def run_pipeline():
         flow_p = output_dir / "flowminder_clean.csv"
         wp_p = output_dir / "worldpop_merged.csv"
         
-        # A. Join features in memory (no 'raw' table written to DB)[cite: 7]
+        # A. Join features in memory (CSVs will already have "nom" and "date" first)
         raw_table_path = output_dir / "training_table.csv"
         df_raw = create_training_table(sit_p, osrm_p, flow_p, wp_p, raw_table_path)
         
-        # B. Apply feature trimming and missingness handling[cite: 6]
+        # B. Apply feature trimming and missingness handling
         df_trimmed = trim_features(df_raw)
         df_final = handle_missingness(df_trimmed)
         
-        # Save local final output backup
+        # Ensure final CSV has "nom" and "date" first
         final_table_path = output_dir / "training_table_final.csv"
+        df_final = df_final[["nom", "date"] + [c for c in df_final.columns if c not in ["nom", "date"]]]
         df_final.to_csv(final_table_path, index=False)
 
-        # Prepare DataFrame for SQL ingestion
+        # Prepare Raw DataFrame for SQL ingestion
+        raw_db = clean_dataframe(df_raw.copy())
+        raw_db.columns = [clean_column_name(c) for c in raw_db.columns]
+        
+        # Force "health_zone" first, "date" second
+        db_cols_raw = ["health_zone", "date"] + [c for c in raw_db.columns if c not in ["health_zone", "date"]]
+        raw_db = raw_db[db_cols_raw]
+
+        # Prepare Final DataFrame for SQL ingestion
         final_db = clean_dataframe(df_final.copy())
         final_db.columns = [clean_column_name(c) for c in final_db.columns]
         
-        target_table_name = "training_table_final"
+        # Force "health_zone" first, "date" second
+        db_cols_final = ["health_zone", "date"] + [c for c in final_db.columns if c not in ["health_zone", "date"]]
+        final_db = final_db[db_cols_final]
+        
+        raw_table_name = "training_table_raw"
+        final_table_name = "training_table_final"
 
-        # C. Secure DB Upload (TRUNCATE & APPEND ONLY)
+        # C. Secure DB Upload (TRUNCATE & APPEND BOTH TABLES)
         with engine.begin() as conn:
-            print(f"🧹 Truncating existing rows in `{target_table_name}`...")
-            conn.exec_driver_sql(f"TRUNCATE TABLE {target_table_name};")
+            # 1. Truncate and Append Raw Table
+            print(f"🧹 Truncating existing rows in `{raw_table_name}`...")
+            conn.exec_driver_sql(f"TRUNCATE TABLE {raw_table_name};")
             
-            print(f"📥 Appending new clean data to `{target_table_name}`...")
+            print(f"📥 Appending new data to `{raw_table_name}`...")
+            raw_db.to_sql(
+                name=raw_table_name,
+                con=conn,
+                if_exists="append",
+                index=False
+            )
+
+            # 2. Truncate and Append Final Table
+            print(f"🧹 Truncating existing rows in `{final_table_name}`...")
+            conn.exec_driver_sql(f"TRUNCATE TABLE {final_table_name};")
+            
+            print(f"📥 Appending new clean data to `{final_table_name}`...")
             final_db.to_sql(
-                name=target_table_name,
+                name=final_table_name,
                 con=conn,
                 if_exists="append",
                 index=False
             )
             
-        print(f"💾 Successfully refreshed data in `{target_table_name}`!")
+        print(f"💾 Successfully truncated and refreshed both SQL tables with customized column sequence!")
         print(f"✅ Success! Active training window contains {len(df_final)} validated data points.")
 
     except Exception as e:
