@@ -60,16 +60,16 @@ def load_population_density(filepath: Path | str) -> pd.DataFrame:
 
 def extract_distance_to_epicenter(matrix_filepath: Path | str, epicenter_name: str = "Bunia") -> pd.DataFrame:
     """Extracts positional travel time durations relative to a defined outbreak epicenter."""
-    # Load the matrix with the first column as the index
+    # Load wide-format matrix with the first column as index
     df_matrix = pd.read_csv(matrix_filepath, index_col=0)
     
-    # Clean index and column headers safely to maintain alignment
+    # Safely clean row index and column dimensions
     df_matrix.index = clean_text_column(pd.Series(df_matrix.index, index=df_matrix.index))
     df_matrix.columns = [clean_text_column(pd.Series([col])).iloc[0] for col in df_matrix.columns]
     
     epicenter_clean = epicenter_name.strip().title()
     if epicenter_clean in df_matrix.columns:
-        # Reset the index so the row health zones become a 'health_zone' column
+        # Reset the index to turn index labels into 'health_zone'
         df_distance = df_matrix[[epicenter_clean]].reset_index()
         df_distance.columns = ['health_zone', 'travel_time_to_epicenter']
     else:
