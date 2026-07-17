@@ -53,6 +53,43 @@ def clean_column_name(col):
     return c.strip('_')
 
 
+def generate_fallback_forecasts(final_table_path):
+    """Generates a baseline 7-day rolling forecast when train_model is missing.
+    
+    This acts as a safety-net to ensure the database schema compiles successfully.
+    """
+    print("⚠️ 'train_model' module not found. Running baseline fallback forecast...")
+    df = pd.read_csv(final_table_path)
+    
+    # Identify active case metrics dynamically
+    case_cols = [c for c in df.columns if any(x in c.lower() for x in ['case', 'cas', 'active'])]
+    
+    predictions = []
+    for hz, group in df.groupby('nom'):
+        group_sorted = group.sort_values(by='date')
+        if not group_sorted.empty:
+            last_row = group_sorted.iloc[-1]
+            last_date = pd.to_datetime(last_row['date'])
+            
+            # Predict last value (naive baseline projection)
+            last_val = 0
+            if case_cols:
+                last_val = last_row[case_cols].mean()
+                if pd.isna(last_val):
+                    last_val = 0
+            
+            # Project forward 7 days
+            for i in range(1, 8):
+                pred_date = last_date + pd.Timedelta(days=i)
+                predictions.append({
+                    "health_zone": hz,
+                    "date": pred_date.date(),
+                    "predicted_cases": max(0.0, float(last_val))
+                })
+                
+    return pd.DataFrame(predictions)
+
+
 def run_pipeline():
     workspace_root = Path(".").resolve()
     output_dir = workspace_root / "output"
@@ -286,14 +323,16 @@ def run_pipeline():
     # --- 7. Run ML Model and Upload Predictions ---
     print("\n⏳ Running Machine Learning Model training & forecasting...")
     try:
-        # Import your model training function here (e.g., from train_model.py)
-        # Assumes a function `generate_forecasts()` exists in `train_model.py`
-        from train_model import generate_forecasts
+        try:
+            # 1. Try to load the primary forecasting model module
+            from train_model import generate_forecasts
+            print("🚀 'train_model' module loaded successfully. Commencing forecast computation...")
+            predictions_df = generate_forecasts(final_table_path)
+        except ModuleNotFoundError:
+            # 2. Fall back to heuristic forecaster if module is absent
+            predictions_df = generate_fallback_forecasts(final_table_path)
         
-        # 1. Generate predictions from the model
-        predictions_df = generate_forecasts(final_table_path) 
-        
-        # 2. Standardize column schema names
+        # 3. Standardize column schema names
         predictions_df.columns = [clean_column_name(c) for c in predictions_df.columns]
         
         # Expected structure: 'health_zone', 'date', 'predicted_cases'
@@ -302,13 +341,24 @@ def run_pipeline():
         
         prediction_table_name = "model_predictions"
 
-        # 3. Securely append forecasts to the DB
+        # 4. Securely write forecasts to the DB
         with engine.begin() as conn:
+            inspector = inspect(engine)
+            
+            # Check if predictions table exists to control schema changes or truncate
+            if inspector.has_table(prediction_table_name):
+                print(f"🧹 Table `{prediction_table_name}` exists. Truncating rows...")
+                conn.exec_driver_sql(f"TRUNCATE TABLE {prediction_table_name};")
+                if_exists_pred = "append"
+            else:
+                print(f"🆕 Table `{prediction_table_name}` does not exist. Creating it...")
+                if_exists_pred = "replace"
+                
             print(f"📥 Appending new prediction records to `{prediction_table_name}`...")
             predictions_db.to_sql(
                 name=prediction_table_name,
                 con=conn,
-                if_exists="append",
+                if_exists=if_exists_pred,
                 index=False
             )
             
