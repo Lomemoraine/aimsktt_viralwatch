@@ -2,7 +2,7 @@ import os
 import re
 from pathlib import Path
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, inspect
 
 from data_processing import (
     clean_dataframe,
@@ -142,33 +142,45 @@ def run_pipeline():
         raw_table_name = "training_table_raw"
         final_table_name = "training_table_final"
 
-        # C. Secure DB Upload (TRUNCATE & APPEND BOTH TABLES)
+        # C. Secure DB Upload (SMART TRUNCATE & APPEND BOTH TABLES)
         with engine.begin() as conn:
-            # 1. Truncate and Append Raw Table
-            print(f"🧹 Truncating existing rows in `{raw_table_name}`...")
-            conn.exec_driver_sql(f"TRUNCATE TABLE {raw_table_name};")
+            inspector = inspect(engine)
             
-            print(f"📥 Appending new data to `{raw_table_name}`...")
+            # --- 1. Handle Raw Table ---
+            if inspector.has_table(raw_table_name):
+                print(f"🧹 Truncating existing rows in `{raw_table_name}`...")
+                conn.exec_driver_sql(f"TRUNCATE TABLE {raw_table_name};")
+                if_exists_raw = "append"
+            else:
+                print(f"🆕 `{raw_table_name}` does not exist. Creating it fresh...")
+                if_exists_raw = "replace"
+
+            print(f"📥 Loading data into `{raw_table_name}`...")
             raw_db.to_sql(
                 name=raw_table_name,
                 con=conn,
-                if_exists="append",
+                if_exists=if_exists_raw,
                 index=False
             )
 
-            # 2. Truncate and Append Final Table
-            print(f"🧹 Truncating existing rows in `{final_table_name}`...")
-            conn.exec_driver_sql(f"TRUNCATE TABLE {final_table_name};")
-            
-            print(f"📥 Appending new clean data to `{final_table_name}`...")
+            # --- 2. Handle Final Table ---
+            if inspector.has_table(final_table_name):
+                print(f"🧹 Truncating existing rows in `{final_table_name}`...")
+                conn.exec_driver_sql(f"TRUNCATE TABLE {final_table_name};")
+                if_exists_final = "append"
+            else:
+                print(f"🆕 `{final_table_name}` does not exist. Creating it fresh...")
+                if_exists_final = "replace"
+
+            print(f"📥 Loading clean data into `{final_table_name}`...")
             final_db.to_sql(
                 name=final_table_name,
                 con=conn,
-                if_exists="append",
+                if_exists=if_exists_final,
                 index=False
             )
             
-        print(f"💾 Successfully truncated and refreshed both SQL tables with customized column sequence!")
+        print(f"💾 Successfully synchronized both SQL tables with customized column sequence!")
         print(f"✅ Success! Active training window contains {len(df_final)} validated data points.")
 
     except Exception as e:
