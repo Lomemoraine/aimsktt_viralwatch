@@ -105,7 +105,7 @@ def predict(zone: str):
         (zone,),
     )
     if r is None:
-        raise HTTPException(status_code=404, detail=f"Unknown health zone: {zone!r}")
+        raise HTTPException(status_code=404, detail=f"Zone does not border Rwanda: {zone!r}")
 
     # --- plug in our  real model here -------------------------------------
 
