@@ -24,7 +24,7 @@ tqdm
 pyshp
 transformers
 torch
-
+tqdm
 
 
 # for dashbord 
