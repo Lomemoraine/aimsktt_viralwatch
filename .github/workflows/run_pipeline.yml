@@ -31,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy sqlalchemy requests psycopg2-binary
+          pip install pandas numpy sqlalchemy requests psycopg2-binary tqdm
 
       - name: Run pipeline
         env:
