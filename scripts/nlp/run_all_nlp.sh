@@ -7,6 +7,9 @@ echo "=========================================="
 echo "Starting NLP Batch Processing Pipeline"
 echo "=========================================="
 
+echo "Ensuring required NLP libraries are installed..."
+pip install -q transformers sentencepiece protobuf torch pandas tqdm
+
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 
 echo "Running Named Entity Recognition..."

@@ -4,15 +4,17 @@ import pandas as pd
 from transformers import pipeline
 from tqdm import tqdm
 
-INPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../BDBV2026-Data/data/public_health_response/processed"))
-OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../output/nlp/summarization"))
+from pathlib import Path
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "nlp", "summarization")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 print("Loading Summarization model (sshleifer/distilbart-cnn-12-6)...")
 summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6", device=-1)
 
-files = glob.glob(os.path.join(INPUT_DIR, "*_en__daily.csv"))
+files = [str(p) for p in Path(PROJECT_ROOT).rglob("*_en__daily.csv")]
 print(f"Found {len(files)} English files for Summarization processing.")
 
 for file_path in files:
