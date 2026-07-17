@@ -29,7 +29,7 @@ STATUS_TRANSLATIONS = {
 DROP_SUFFIXES = ("__static", ".matrix")
 KEEP_FLOWMINDER_PREFIX = "flowminder_short_trips__"
 
-# --- ML Step 1 & 2 Config ---
+# --- ML Trimming & Missingness Config ---
 COLLINEAR_DROP_COLS = [
     "total_poe_hand_washing", "total_poe_passed", "total_poe_sanitised",
     "total_poe_refused_hand_washing",
@@ -317,7 +317,7 @@ def create_training_table(sitrep_path: Path, osrm_path: Path, flow_path: Path, w
 
 
 def trim_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Trims collinear/redundant and national summary features."""
+    """Trims collinear/redundant and national summary features[cite: 6]."""
     national_cols = [c for c in df.columns if c.startswith(NATIONAL_PREFIX)]
     all_drop = COLLINEAR_DROP_COLS + national_cols
 
@@ -329,28 +329,28 @@ def trim_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def handle_missingness(df: pd.DataFrame) -> pd.DataFrame:
-    """Implements missingness cleanup, forward-fills and specific-imputation strategies."""
-    # 1. Drop highly sparse columns
+    """Implements missingness cleanup, forward-fills, and specific-imputation strategies[cite: 6]."""
+    # 1. Drop highly sparse columns[cite: 6]
     high_missing = df.isna().mean() > HIGH_MISSING_THRESHOLD
     drop_cols = high_missing[high_missing].index.tolist()
     df = df.drop(columns=drop_cols)
 
-    # 2. Forward fill cumulative variables
+    # 2. Forward fill cumulative variables per zone[cite: 6]
     cum_cols = [c for c in df.columns if c.startswith("cumulative_")]
     df = df.sort_values(["nom", "date"])
     df[cum_cols] = df.groupby("nom")[cum_cols].ffill()
 
-    # 3. Drop rows missing the target variable
+    # 3. Drop rows missing the target variable[cite: 6]
     df = df[df[TARGET_COL].notna()].copy()
 
-    # 4. Drop minor operational variables
+    # 4. Drop minor operational variables[cite: 6]
     present_secondary = [c for c in DROP_SECONDARY_COLS if c in df.columns]
     df = df.drop(columns=present_secondary)
 
-    # 5. Impute Flowminder signal loss with 0
+    # 5. Impute Flowminder signal loss with 0[cite: 6]
     flow_cols = [c for c in df.columns if c.startswith(KEEP_FLOWMINDER_PREFIX)]
     df[flow_cols] = df[flow_cols].fillna(0)
 
-    # 6. Drop remaining NaN rows
+    # 6. Drop remaining NaN rows[cite: 6]
     df = df.dropna()
     return df.sort_values("date", ascending=True)
