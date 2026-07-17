@@ -351,7 +351,7 @@ def run_pipeline():
         return
 
     try:
-        nlp_df = run_nlp_pipeline()[cite: 3, 4, 5, 6]
+        nlp_df = run_nlp_pipeline()
         
         if nlp_df is not None and not nlp_df.empty:
             print("📥 Uploading processed NLP elements into relational database schema...")
