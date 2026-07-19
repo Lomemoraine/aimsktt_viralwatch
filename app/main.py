@@ -111,6 +111,29 @@ def predict(zone: str):
     prob = float(r["next7d_prob"])
     # ----------------------------------------------------------------------
 
+
+
+    #TO TEST THE ABOVE 
+
+    # from joblib import load
+
+    # model = load(ROOT / "models" / "classifier.joblib")
+
+    # features = [[
+    #     r["days_since_first_case"],
+    #     r["cumulative_confirmed_cases"],
+    #     r["cumulative_confirmed_deaths"],
+    #     r["cumulative_contacts_isolated"],
+    #     r["cumulative_contacts_traced"],
+    #     r["cumulative_suspected_cases"],
+    #     r["cumulative_suspected_deaths"],
+    #     r["pop_density"],
+    #     r["travel_time_to_epicenter"],
+    # ]]
+
+    # prob = float(model.predict_proba(features)[0, 1])
+
+
     return PredictResponse(
         zone=r["zone"],
         province=r["province"],
