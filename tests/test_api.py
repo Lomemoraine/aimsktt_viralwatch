@@ -26,6 +26,7 @@ def test_predict_endpoint():
     payload = response.json()
     assert payload["zone"] == "Goma"
     assert 0 <= payload["next7d_case_probability"] <= 1
+    assert "model" in payload["note"].lower()
 
 
 def test_briefing_endpoint():

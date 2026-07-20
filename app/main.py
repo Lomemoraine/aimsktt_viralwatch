@@ -16,6 +16,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import joblib
+import numpy as np
+import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -33,6 +36,31 @@ from app.nlp import extract_briefing
 ROOT = Path(__file__).resolve().parent.parent
 DASHBOARD = ROOT / "dashboard"
 GEOJSON_PATH = ROOT / "data" / "processed" / "zones.geojson"
+MODEL_PATH = ROOT / "ml" / "models" / "random_forest_baseline.joblib"
+SCALER_PATH = ROOT / "ml" / "models" / "feature_scaler.joblib"
+FEATURES = [
+    "cumulative_confirmed_cases",
+    "days_since_first_case",
+    "pop_density",
+    "travel_time_to_epicenter",
+]
+
+MODEL = None
+SCALER = None
+
+
+def _load_model_artifacts():
+    global MODEL, SCALER
+    if MODEL is None or SCALER is None:
+        if not MODEL_PATH.exists():
+            raise FileNotFoundError(f"Model artifact not found at {MODEL_PATH}")
+        if not SCALER_PATH.exists():
+            raise FileNotFoundError(f"Scaler artifact not found at {SCALER_PATH}")
+        MODEL = joblib.load(MODEL_PATH)
+        SCALER = joblib.load(SCALER_PATH)
+
+
+_load_model_artifacts()
 
 app = FastAPI(
     title="ViralWatch API",
@@ -112,14 +140,25 @@ def predict(zone: str):
 
 
 
-
-
-
-
-    # from joblib import load
-    # model = load(ROOT / "models" / "classifier.joblib")   FROM ROOT FOLDER AIMSKTT_VIRALWATCHV2/MODELS/...
-    # prob = float(model.predict_proba([[...features...]])[0, 1])
-    prob = float(r["next7d_prob"])
+    try:
+        _load_model_artifacts()
+        input_df = pd.DataFrame(
+            [
+                [
+                    float(r["cumulative_cases"]),
+                    float(r["days_since_first_case"]),
+                    float(r["population_density"]),
+                    float(r["travel_time_min"]),
+                ]
+            ],
+            columns=FEATURES,
+        )
+        scaled_input = SCALER.transform(input_df)
+        prob = float(MODEL.predict_proba(scaled_input)[0, 1])
+        note = "Predicted by the loaded random_forest_baseline joblib model."
+    except Exception as exc:
+        prob = float(r["next7d_prob"])
+        note = f"Fell back to DB value because model inference failed: {exc}"
     # ----------------------------------------------------------------------
 
     return PredictResponse(
@@ -131,7 +170,7 @@ def predict(zone: str):
         days_since_first_case=r["days_since_first_case"],
         travel_time_min=r["travel_time_min"],
         population_density=r["population_density"],
-        note="Skeleton value from DB. Replace with live model.predict_proba() — see main.py.",
+        note=note,
     )
 
 
